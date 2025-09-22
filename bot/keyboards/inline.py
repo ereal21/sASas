@@ -437,6 +437,32 @@ def stock_value_actions(user_id: int, value_id: int, item_name: str) -> InlineKe
     item_token = _get_item_token(cache, item_name)
     inline_keyboard = [
         [InlineKeyboardButton('🗑 Delete', callback_data=f'stock_del:{value_id}')],
+        [InlineKeyboardButton('🔙 Go back', callback_data=f'stock_vals:{item_token}')]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
+
+
+def stock_item_actions(user_id: int, item_name: str, category_name: str) -> InlineKeyboardMarkup:
+    """Actions available for a single item inside stock management."""
+    cache = _ensure_stock_cache(user_id)
+    item_token = _get_item_token(cache, item_name)
+    category_token = _get_category_token(cache, category_name)
+    inline_keyboard = [
+        [InlineKeyboardButton('📦 View stock', callback_data=f'stock_vals:{item_token}')],
+        [InlineKeyboardButton('💶 Change price', callback_data=f'stock_price:{item_token}')],
+        [InlineKeyboardButton('🔙 Go back', callback_data=f'stock_cat:{category_token}')],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
+
+
+def stock_price_prompt(user_id: int, item_name: str) -> InlineKeyboardMarkup:
+    """Inline keyboard shown while waiting for a new price input."""
+    cache = _ensure_stock_cache(user_id)
+    item_token = _get_item_token(cache, item_name)
+    inline_keyboard = [
+        [InlineKeyboardButton('🔙 Cancel', callback_data=f'stock_item:{item_token}')]
+    inline_keyboard = [
+        [InlineKeyboardButton('🗑 Delete', callback_data=f'stock_del:{value_id}')],
         [InlineKeyboardButton('🔙 Go back', callback_data=f'stock_item:{item_token}')]
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
