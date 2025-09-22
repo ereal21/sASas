@@ -461,6 +461,9 @@ def stock_price_prompt(user_id: int, item_name: str) -> InlineKeyboardMarkup:
     item_token = _get_item_token(cache, item_name)
     inline_keyboard = [
         [InlineKeyboardButton('🔙 Cancel', callback_data=f'stock_item:{item_token}')]
+    inline_keyboard = [
+        [InlineKeyboardButton('🗑 Delete', callback_data=f'stock_del:{value_id}')],
+        [InlineKeyboardButton('🔙 Go back', callback_data=f'stock_item:{item_token}')]
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 

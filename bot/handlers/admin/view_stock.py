@@ -200,6 +200,13 @@ async def view_stock_price_prompt_handler(call: CallbackQuery):
     item_name = resolve_stock_item(user_id, item_token)
     if not item_name:
         await call.answer('Invalid data')
+    if values:
+        await bot.edit_message_text(
+            f'📦 Stock for {display_name(item_name)}',
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=stock_values_list(user_id, values, item_name),
+        )
         return
     info = get_item_info(item_name)
     if not info:
@@ -338,6 +345,7 @@ async def stock_price_input_handler(message: Message):
         user_id,
         item_name,
         notice='✅ Price updated',
+
     )
 
 
