@@ -17,6 +17,9 @@ from bot.database.methods import (
 from bot.database.models import Permission
 from bot.handlers.other import get_bot_user_ids
 from bot.keyboards import (
+    resolve_stock_category,
+    resolve_stock_item,
+    reset_stock_cache,
     stock_categories_list,
     stock_goods_list,
     stock_values_list,
@@ -31,6 +34,7 @@ async def view_stock_callback_handler(call: CallbackQuery):
     TgConfig.STATE[user_id] = None
     role = check_role(user_id)
     if role & Permission.OWN:
+        reset_stock_cache(user_id)
         categories = get_all_category_names()
         lines = ['📋 Stock list']
         for category in categories:
@@ -51,7 +55,7 @@ async def view_stock_callback_handler(call: CallbackQuery):
             '📦 Choose category',
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            reply_markup=stock_categories_list(categories, None),
+            reply_markup=stock_categories_list(user_id, categories, None),
         )
         return
     await call.answer('Insufficient rights')
@@ -63,7 +67,11 @@ async def view_stock_category_handler(call: CallbackQuery):
     if not role & Permission.OWN:
         await call.answer('Insufficient rights')
         return
-    category = call.data.split(':', 1)[1]
+    category_token = call.data.split(':', 1)[1]
+    category = resolve_stock_category(user_id, category_token)
+    if not category:
+        await call.answer('Invalid data')
+        return
     subs = get_all_subcategories(category)
     if subs:
         parent = get_category_parent(category)
@@ -71,7 +79,7 @@ async def view_stock_category_handler(call: CallbackQuery):
             '📂 Choose category',
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            reply_markup=stock_categories_list(subs, parent),
+            reply_markup=stock_categories_list(user_id, subs, parent),
         )
         return
     items = get_all_item_names(category)
@@ -80,7 +88,7 @@ async def view_stock_category_handler(call: CallbackQuery):
             '🏷 Choose item',
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            reply_markup=stock_goods_list(items, category),
+            reply_markup=stock_goods_list(user_id, items, category),
         )
         return
     await call.answer('No items')
@@ -92,14 +100,18 @@ async def view_stock_item_handler(call: CallbackQuery):
     if not role & Permission.OWN:
         await call.answer('Insufficient rights')
         return
-    _, item_name, category = call.data.split(':', 2)
+    _, item_token = call.data.split(':', 1)
+    item_name = resolve_stock_item(user_id, item_token)
+    if not item_name:
+        await call.answer('Invalid data')
+        return
     values = get_item_values(item_name)
     if values:
         await bot.edit_message_text(
             f'📦 Stock for {display_name(item_name)}',
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            reply_markup=stock_values_list(values, item_name, category),
+            reply_markup=stock_values_list(user_id, values, item_name),
         )
         return
     await call.answer('No stock')
@@ -111,12 +123,13 @@ async def view_stock_value_handler(call: CallbackQuery):
     if not role & Permission.OWN:
         await call.answer('Insufficient rights')
         return
-    _, value_id, item_name, category = call.data.split(':', 3)
-    value_id = int(value_id)
+    _, raw_value_id = call.data.split(':', 1)
+    value_id = int(raw_value_id)
     value = get_item_value_by_id(value_id)
     if not value:
         await call.answer('Not found')
         return
+    item_name = value['item_name']
     if value['value'] and os.path.isfile(value['value']):
         desc = ''
         desc_file = f"{value['value']}.txt"
@@ -137,7 +150,7 @@ async def view_stock_value_handler(call: CallbackQuery):
         f'ID {value_id}',
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        reply_markup=stock_value_actions(value_id, item_name, category),
+        reply_markup=stock_value_actions(user_id, value_id, item_name),
     )
 
 
@@ -147,10 +160,14 @@ async def view_stock_delete_handler(call: CallbackQuery):
     if not role & Permission.OWN:
         await call.answer('Insufficient rights')
         return
-    _, value_id, item_name, category = call.data.split(':', 3)
-    value_id = int(value_id)
+    _, raw_value_id = call.data.split(':', 1)
+    value_id = int(raw_value_id)
     value = get_item_value_by_id(value_id)
-    if value and value['value'] and os.path.isfile(value['value']):
+    if not value:
+        await call.answer('Not found')
+        return
+    item_name = value['item_name']
+    if value['value'] and os.path.isfile(value['value']):
         os.remove(value['value'])
     buy_item(value_id)
     values = get_item_values(item_name)
@@ -158,7 +175,7 @@ async def view_stock_delete_handler(call: CallbackQuery):
         '✅ Stock deleted',
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
-        reply_markup=stock_values_list(values, item_name, category),
+        reply_markup=stock_values_list(user_id, values, item_name),
     )
 
 
