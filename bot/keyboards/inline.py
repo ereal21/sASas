@@ -2,7 +2,12 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot.database.models import Permission
 
 from bot.localization import t
-from bot.database.methods import get_category_parent, select_item_values_amount, has_used_promo_for_item
+from bot.database.methods import (
+    get_category_parent,
+    select_item_values_amount,
+    has_used_promo_for_item,
+)
+from bot.misc import TgConfig
 from bot.utils import display_name
 
 
@@ -312,47 +317,127 @@ def promo_manage_actions(code: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
-def stock_categories_list(list_items: list[str], parent: str | None) -> InlineKeyboardMarkup:
+def _stock_cache_key(user_id: int) -> str:
+    return f'{user_id}_stock_cache'
+
+
+def _ensure_stock_cache(user_id: int) -> dict:
+    key = _stock_cache_key(user_id)
+    cache = TgConfig.STATE.get(key)
+    if not isinstance(cache, dict):
+        cache = {
+            'category_tokens': {},
+            'categories': {},
+            'item_tokens': {},
+            'items': {},
+        }
+        TgConfig.STATE[key] = cache
+    else:
+        cache.setdefault('category_tokens', {})
+        cache.setdefault('categories', {})
+        cache.setdefault('item_tokens', {})
+        cache.setdefault('items', {})
+    return cache
+
+
+def reset_stock_cache(user_id: int) -> None:
+    TgConfig.STATE[_stock_cache_key(user_id)] = {
+        'category_tokens': {},
+        'categories': {},
+        'item_tokens': {},
+        'items': {},
+    }
+
+
+def _get_category_token(cache: dict, name: str) -> str:
+    tokens = cache['category_tokens']
+    reverse = cache['categories']
+    if name not in tokens:
+        token = f'c{len(tokens) + 1}'
+        tokens[name] = token
+        reverse[token] = name
+    return tokens[name]
+
+
+def _get_item_token(cache: dict, name: str) -> str:
+    tokens = cache['item_tokens']
+    reverse = cache['items']
+    if name not in tokens:
+        token = f'i{len(tokens) + 1}'
+        tokens[name] = token
+        reverse[token] = name
+    return tokens[name]
+
+
+def resolve_stock_category(user_id: int, token: str) -> str | None:
+    cache = _ensure_stock_cache(user_id)
+    return cache['categories'].get(token)
+
+
+def resolve_stock_item(user_id: int, token: str) -> str | None:
+    cache = _ensure_stock_cache(user_id)
+    return cache['items'].get(token)
+
+
+def stock_categories_list(user_id: int, list_items: list[str], parent: str | None) -> InlineKeyboardMarkup:
     """List categories or subcategories for stock view."""
+    cache = _ensure_stock_cache(user_id)
     markup = InlineKeyboardMarkup()
     for name in list_items:
-        markup.add(InlineKeyboardButton(text=name, callback_data=f'stock_cat:{name}'))
-    back_data = 'console' if parent is None else f'stock_cat:{parent}'
+        token = _get_category_token(cache, name)
+        markup.add(InlineKeyboardButton(text=name, callback_data=f'stock_cat:{token}'))
+    if parent is None:
+        back_data = 'console'
+    else:
+        parent_token = _get_category_token(cache, parent)
+        back_data = f'stock_cat:{parent_token}'
     markup.add(InlineKeyboardButton('🔙 Go back', callback_data=back_data))
     return markup
 
 
-def stock_goods_list(list_items: list[str], category_name: str) -> InlineKeyboardMarkup:
+def stock_goods_list(user_id: int, list_items: list[str], category_name: str) -> InlineKeyboardMarkup:
     """Show goods with stock counts for a category."""
+    cache = _ensure_stock_cache(user_id)
+    # Ensure the current category has a token so the "Go back" button can reference it later.
+    _get_category_token(cache, category_name)
     markup = InlineKeyboardMarkup()
     for name in list_items:
         amount = select_item_values_amount(name)
+        item_token = _get_item_token(cache, name)
         markup.add(InlineKeyboardButton(
             text=f'{display_name(name)} ({amount})',
-            callback_data=f'stock_item:{name}:{category_name}'
+            callback_data=f'stock_item:{item_token}'
         ))
     parent = get_category_parent(category_name)
-    back_data = 'console' if parent is None else f'stock_cat:{parent}'
+    if parent is None:
+        back_data = 'console'
+    else:
+        parent_token = _get_category_token(cache, parent)
+        back_data = f'stock_cat:{parent_token}'
     markup.add(InlineKeyboardButton('🔙 Go back', callback_data=back_data))
     return markup
 
 
-def stock_values_list(values, item_name: str, category_name: str) -> InlineKeyboardMarkup:
+def stock_values_list(user_id: int, values, item_name: str) -> InlineKeyboardMarkup:
     """List individual stock entries for an item."""
+    cache = _ensure_stock_cache(user_id)
+    item_token = _get_item_token(cache, item_name)
     markup = InlineKeyboardMarkup()
     for val in values:
         markup.add(InlineKeyboardButton(
             text=f'ID {val.id}',
-            callback_data=f'stock_val:{val.id}:{item_name}:{category_name}'
+            callback_data=f'stock_val:{val.id}'
         ))
-    markup.add(InlineKeyboardButton('🔙 Go back', callback_data=f'stock_item:{item_name}:{category_name}'))
+    markup.add(InlineKeyboardButton('🔙 Go back', callback_data=f'stock_item:{item_token}'))
     return markup
 
 
-def stock_value_actions(value_id: int, item_name: str, category_name: str) -> InlineKeyboardMarkup:
+def stock_value_actions(user_id: int, value_id: int, item_name: str) -> InlineKeyboardMarkup:
+    cache = _ensure_stock_cache(user_id)
+    item_token = _get_item_token(cache, item_name)
     inline_keyboard = [
-        [InlineKeyboardButton('🗑 Delete', callback_data=f'stock_del:{value_id}:{item_name}:{category_name}')],
-        [InlineKeyboardButton('🔙 Go back', callback_data=f'stock_item:{item_name}:{category_name}')]
+        [InlineKeyboardButton('🗑 Delete', callback_data=f'stock_del:{value_id}')],
+        [InlineKeyboardButton('🔙 Go back', callback_data=f'stock_item:{item_token}')]
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
