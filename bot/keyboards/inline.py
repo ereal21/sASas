@@ -437,7 +437,7 @@ def stock_value_actions(user_id: int, value_id: int, item_name: str) -> InlineKe
     item_token = _get_item_token(cache, item_name)
     inline_keyboard = [
         [InlineKeyboardButton('🗑 Delete', callback_data=f'stock_del:{value_id}')],
-        [InlineKeyboardButton('🔙 Go back', callback_data=f'stock_vals:{item_token}')]
+        [InlineKeyboardButton('🔙 Go back', callback_data=f'stock_vals:{item_token}')],
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
@@ -460,37 +460,29 @@ def stock_price_prompt(user_id: int, item_name: str) -> InlineKeyboardMarkup:
     cache = _ensure_stock_cache(user_id)
     item_token = _get_item_token(cache, item_name)
     inline_keyboard = [
-        [InlineKeyboardButton('🔙 Cancel', callback_data=f'stock_item:{item_token}')]
-    inline_keyboard = [
-        [InlineKeyboardButton('🗑 Delete', callback_data=f'stock_del:{value_id}')],
-        [InlineKeyboardButton('🔙 Go back', callback_data=f'stock_item:{item_token}')]
+        [InlineKeyboardButton('🔙 Cancel', callback_data=f'stock_item:{item_token}')],
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
-
 def close() -> InlineKeyboardMarkup:
     inline_keyboard = [
-        [InlineKeyboardButton('Hide', callback_data='close')
-         ]
+        [InlineKeyboardButton('Hide', callback_data='close')],
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
 def check_sub(channel_username: str) -> InlineKeyboardMarkup:
     inline_keyboard = [
-        [InlineKeyboardButton('Subscribe', url=f'https://t.me/{channel_username}')
-         ],
-        [InlineKeyboardButton('Check', callback_data='sub_channel_done')
-         ]
+        [InlineKeyboardButton('Subscribe', url=f'https://t.me/{channel_username}')],
+        [InlineKeyboardButton('Check', callback_data='sub_channel_done')],
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
 def back(callback: str) -> InlineKeyboardMarkup:
     inline_keyboard = [
-        [InlineKeyboardButton('🔙 Go back', callback_data=callback)
-         ]
+        [InlineKeyboardButton('🔙 Go back', callback_data=callback)],
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
