@@ -39,21 +39,6 @@ async def view_stock_callback_handler(call: CallbackQuery):
     if role & Permission.OWN:
         reset_stock_cache(user_id)
         categories = get_all_category_names()
-        lines = ['📋 Stock list']
-        for category in categories:
-            lines.append(f"\n<b>{category}</b>")
-            for sub in get_all_subcategories(category):
-                lines.append(f"  {sub}")
-                for item in get_all_item_names(sub):
-                    info = get_item_info(item)
-                    count = select_item_values_amount(item)
-                    lines.append(f"    • {display_name(item)} ({info['price']:.2f}€, {count})")
-            for item in get_all_item_names(category):
-                info = get_item_info(item)
-                count = select_item_values_amount(item)
-                lines.append(f"  • {display_name(item)} ({info['price']:.2f}€, {count})")
-        text = '\n'.join(lines)
-        await bot.send_message(call.message.chat.id, text, parse_mode='HTML')
         await bot.edit_message_text(
             '📦 Choose category',
             chat_id=call.message.chat.id,
