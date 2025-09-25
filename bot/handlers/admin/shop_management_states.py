@@ -1,7 +1,7 @@
 import datetime
 import os
 import shutil
-import datetime
+from decimal import Decimal, InvalidOperation
 
 from aiogram import Dispatcher
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -884,13 +884,18 @@ async def add_item_price(message: Message):
     message_id = TgConfig.STATE.get(f'{user_id}_message_id')
     await bot.delete_message(chat_id=message.chat.id,
                              message_id=message.message_id)
-    if not message.text.isdigit():
+    raw_price = (message.text or '').replace(',', '.').strip()
+    try:
+        price = Decimal(raw_price)
+    except (InvalidOperation, ValueError):
+        price = None
+    if not price or price <= 0 or price != price.quantize(Decimal('1')):
         await bot.edit_message_text(chat_id=message.chat.id,
                                     message_id=message_id,
                                     text='⚠️ Invalid price value.',
                                     reply_markup=back('item-management'))
         return
-    TgConfig.STATE[f'{user_id}_price'] = message.text
+    TgConfig.STATE[f'{user_id}_price'] = int(price)
     categories = get_all_category_names()
     markup = InlineKeyboardMarkup()
     for cat in categories:
