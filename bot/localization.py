@@ -70,7 +70,27 @@ LANGUAGES = {
             'Good luck!'
         ),
         'confirm_purchase': 'Confirm purchase of {item} for {price}€?',
-        'purchase_button': 'Purchase',
+        'confirm_purchase_details': (
+            '💳 Balance available: {balance}€\n'
+            '🧾 Amount due after credits: {due}€\n\n'
+            'Choose how you want to pay:'
+        ),
+        'pay_with_balance': 'Pay with balance ({amount}€)',
+        'pay_with_crypto': 'Pay fully with crypto ({amount}€)',
+        'pay_with_crypto_after_credits': 'Use {credits}€ credits & pay {due}€',
+        'crypto_selection_prompt': 'Choose a cryptocurrency to pay {amount}€ for {item}.',
+        'purchase_invoice_caption': (
+            '🧾 <b>Invoice for {item}</b>\n'
+            'Amount due: <code>{amount}</code> {currency}\n'
+            'Your applied credits: {credits}€\n'
+            'Send exactly this amount to the address below:'
+        ),
+        'purchase_invoice_paid': '✅ Payment received for {item}. Delivering your order…',
+        'purchase_invoice_cancelled': '🚫 Purchase canceled. No payment received.',
+        'purchase_invoice_timeout': '⌛ Payment window expired. Invoice canceled.',
+        'purchase_invoice_check_failed': '❌ Payment not found yet. Please try again later.',
+        'not_enough_balance_for_credit': '❌ You no longer have enough credits for that deduction.',
+        'purchase_out_of_stock': '❌ Item is no longer in stock. Please contact support.',
         'apply_promo': 'Apply promo code',
         'promo_prompt': 'Send promo code:',
         'promo_invalid': '❌ Invalid or expired promo code',
@@ -156,7 +176,27 @@ LANGUAGES = {
             'Удачи!'
         ),
         'confirm_purchase': 'Подтвердить покупку {item} за {price}€?',
-        'purchase_button': 'Купить',
+        'confirm_purchase_details': (
+            '💳 Доступно на балансе: {balance}€\n'
+            '🧾 К оплате после списания: {due}€\n\n'
+            'Выберите способ оплаты:'
+        ),
+        'pay_with_balance': 'Оплатить с баланса ({amount}€)',
+        'pay_with_crypto': 'Оплатить полностью криптой ({amount}€)',
+        'pay_with_crypto_after_credits': 'Списать {credits}€ и оплатить {due}€ криптой',
+        'crypto_selection_prompt': 'Выберите криптовалюту для оплаты {amount}€ за {item}.',
+        'purchase_invoice_caption': (
+            '🧾 <b>Инвойс за {item}</b>\n'
+            'Сумма к оплате: <code>{amount}</code> {currency}\n'
+            'Применённые кредиты: {credits}€\n'
+            'Отправьте точно эту сумму на адрес ниже:'
+        ),
+        'purchase_invoice_paid': '✅ Платёж за {item} получен. Высылаем заказ…',
+        'purchase_invoice_cancelled': '🚫 Покупка отменена. Платёж не поступил.',
+        'purchase_invoice_timeout': '⌛ Время на оплату истекло. Инвойс отменён.',
+        'purchase_invoice_check_failed': '❌ Платёж ещё не найден. Попробуйте позже.',
+        'not_enough_balance_for_credit': '❌ Недостаточно средств на балансе для такого списания.',
+        'purchase_out_of_stock': '❌ Товар закончился. Свяжитесь с поддержкой.',
         'apply_promo': 'Применить промокод',
         'promo_prompt': 'Введите промокод:',
         'promo_invalid': '❌ Недействительный или просроченный промокод',
@@ -241,7 +281,27 @@ LANGUAGES = {
             'Sėkmės!'
         ),
         'confirm_purchase': 'Patvirtinti {item} pirkimą už {price}€?',
-        'purchase_button': 'Pirkti',
+        'confirm_purchase_details': (
+            '💳 Turimas kreditas: {balance}€\n'
+            '🧾 Suma po kreditų: {due}€\n\n'
+            'Pasirinkite apmokėjimo būdą:'
+        ),
+        'pay_with_balance': 'Apmokėti iš balanso ({amount}€)',
+        'pay_with_crypto': 'Visą sumą mokėti kriptovaliuta ({amount}€)',
+        'pay_with_crypto_after_credits': 'Naudoti {credits}€ kreditų ir mokėti {due}€',
+        'crypto_selection_prompt': 'Pasirinkite kriptovaliutą sumokėti {amount}€ už {item}.',
+        'purchase_invoice_caption': (
+            '🧾 <b>Sąskaita už {item}</b>\n'
+            'Mokėtina suma: <code>{amount}</code> {currency}\n'
+            'Pritaikyti kreditai: {credits}€\n'
+            'Išsiųskite tiksliai šią sumą žemiau pateiktu adresu:'
+        ),
+        'purchase_invoice_paid': '✅ Gauta {item} apmokėjimas. Paruošiame užsakymą…',
+        'purchase_invoice_cancelled': '🚫 Pirkimas atšauktas. Apmokėjimo negauta.',
+        'purchase_invoice_timeout': '⌛ Apmokėjimo laikas baigėsi. Sąskaita atšaukta.',
+        'purchase_invoice_check_failed': '❌ Apmokėjimas dar negautas. Pabandykite vėliau.',
+        'not_enough_balance_for_credit': '❌ Nebepakanka kreditų šiam nurašymui.',
+        'purchase_out_of_stock': '❌ Prekės nebėra sandėlyje. Susisiekite su palaikymu.',
         'apply_promo': 'Taikyti nuolaidos kodą',
         'promo_prompt': 'Įveskite nuolaidos kodą:',
         'promo_invalid': '❌ Neteisingas arba pasibaigęs kodas',

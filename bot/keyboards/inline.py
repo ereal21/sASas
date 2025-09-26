@@ -156,13 +156,47 @@ def console(role: int) -> InlineKeyboardMarkup:
     inline_keyboard.append([InlineKeyboardButton('🔙 Back to menu', callback_data='back_to_menu')])
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
-def confirm_purchase_menu(item_name: str, lang: str, user_id: int | None = None) -> InlineKeyboardMarkup:
-    inline_keyboard = [
-        [InlineKeyboardButton(t(lang, 'purchase_button'), callback_data=f'buy_{item_name}')],
-    ]
-    # Show promo button only if user hasn't used promo for this item yet
+def confirm_purchase_menu(
+    item_name: str,
+    lang: str,
+    user_id: int | None,
+    price: float,
+    balance: float,
+) -> InlineKeyboardMarkup:
+    inline_keyboard: list[list[InlineKeyboardButton]] = []
+
+    if balance >= price > 0:
+        inline_keyboard.append([
+            InlineKeyboardButton(
+                t(lang, 'pay_with_balance', amount=f'{price:.2f}'),
+                callback_data=f'buy_{item_name}',
+            )
+        ])
+    elif balance > 0:
+        due = max(price - balance, 0)
+        inline_keyboard.append([
+            InlineKeyboardButton(
+                t(
+                    lang,
+                    'pay_with_crypto_after_credits',
+                    credits=f'{balance:.2f}',
+                    due=f'{due:.2f}',
+                ),
+                callback_data=f'creditpay_{item_name}',
+            )
+        ])
+
+    inline_keyboard.append([
+        InlineKeyboardButton(
+            t(lang, 'pay_with_crypto', amount=f'{price:.2f}'),
+            callback_data=f'cryptobuy_{item_name}',
+        )
+    ])
+
     if user_id is None or not has_used_promo_for_item(user_id, item_name):
-        inline_keyboard.append([InlineKeyboardButton(t(lang, 'apply_promo'), callback_data=f'applypromo_{item_name}')])
+        inline_keyboard.append(
+            [InlineKeyboardButton(t(lang, 'apply_promo'), callback_data=f'applypromo_{item_name}')]
+        )
     inline_keyboard.append([InlineKeyboardButton('🔙 Back to menu', callback_data='back_to_menu')])
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
@@ -437,7 +471,7 @@ def stock_value_actions(user_id: int, value_id: int, item_name: str) -> InlineKe
     item_token = _get_item_token(cache, item_name)
     inline_keyboard = [
         [InlineKeyboardButton('🗑 Delete', callback_data=f'stock_del:{value_id}')],
-        [InlineKeyboardButton('🔙 Go back', callback_data=f'stock_vals:{item_token}')]
+        [InlineKeyboardButton('🔙 Go back', callback_data=f'stock_vals:{item_token}')],
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
@@ -460,37 +494,29 @@ def stock_price_prompt(user_id: int, item_name: str) -> InlineKeyboardMarkup:
     cache = _ensure_stock_cache(user_id)
     item_token = _get_item_token(cache, item_name)
     inline_keyboard = [
-        [InlineKeyboardButton('🔙 Cancel', callback_data=f'stock_item:{item_token}')]
-    inline_keyboard = [
-        [InlineKeyboardButton('🗑 Delete', callback_data=f'stock_del:{value_id}')],
-        [InlineKeyboardButton('🔙 Go back', callback_data=f'stock_item:{item_token}')]
+        [InlineKeyboardButton('🔙 Cancel', callback_data=f'stock_item:{item_token}')],
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
-
 def close() -> InlineKeyboardMarkup:
     inline_keyboard = [
-        [InlineKeyboardButton('Hide', callback_data='close')
-         ]
+        [InlineKeyboardButton('Hide', callback_data='close')],
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
 def check_sub(channel_username: str) -> InlineKeyboardMarkup:
     inline_keyboard = [
-        [InlineKeyboardButton('Subscribe', url=f'https://t.me/{channel_username}')
-         ],
-        [InlineKeyboardButton('Check', callback_data='sub_channel_done')
-         ]
+        [InlineKeyboardButton('Subscribe', url=f'https://t.me/{channel_username}')],
+        [InlineKeyboardButton('Check', callback_data='sub_channel_done')],
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
 def back(callback: str) -> InlineKeyboardMarkup:
     inline_keyboard = [
-        [InlineKeyboardButton('🔙 Go back', callback_data=callback)
-         ]
+        [InlineKeyboardButton('🔙 Go back', callback_data=callback)],
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
@@ -522,7 +548,7 @@ def confirm_cancel(invoice_id: str, lang: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 
 
-def crypto_choice() -> InlineKeyboardMarkup:
+def crypto_choice(back_callback: str = 'replenish_balance') -> InlineKeyboardMarkup:
     inline_keyboard = [
         [InlineKeyboardButton('SOL', callback_data='crypto_SOL'),
          InlineKeyboardButton('BTC', callback_data='crypto_BTC')],
@@ -531,7 +557,15 @@ def crypto_choice() -> InlineKeyboardMarkup:
         [InlineKeyboardButton('USDT (TRC20)', callback_data='crypto_USDTTRC20'),
          InlineKeyboardButton('ETH', callback_data='crypto_ETH')],
         [InlineKeyboardButton('LTC', callback_data='crypto_LTC')],
-        [InlineKeyboardButton('🔙 Go back', callback_data='replenish_balance')]
+        [InlineKeyboardButton('🔙 Go back', callback_data=back_callback)]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
+
+
+def purchase_crypto_invoice_menu(invoice_id: str, lang: str) -> InlineKeyboardMarkup:
+    inline_keyboard = [
+        [InlineKeyboardButton('🔄 Check payment', callback_data=f'check_purchase_{invoice_id}')],
+        [InlineKeyboardButton(t(lang, 'cancel_payment'), callback_data=f'cancel_purchase_{invoice_id}')],
     ]
     return InlineKeyboardMarkup(inline_keyboard=inline_keyboard)
 

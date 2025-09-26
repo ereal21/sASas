@@ -27,9 +27,9 @@ from bot.database.methods import (
 from bot.handlers.other import get_bot_user_ids, get_bot_info
 from bot.keyboards import (
     main_menu, categories_list, goods_list, subcategories_list, user_items_list, back, item_info,
-    profile, rules, payment_menu, close, crypto_choice, crypto_invoice_menu, blackjack_controls,
-    blackjack_bet_input_menu, blackjack_end_menu, blackjack_history_menu, confirm_cancel, feedback_menu,
-    tip_menu, confirm_purchase_menu)
+    profile, rules, payment_menu, close, crypto_choice, crypto_invoice_menu, purchase_crypto_invoice_menu,
+    blackjack_controls, blackjack_bet_input_menu, blackjack_end_menu, blackjack_history_menu, confirm_cancel,
+    feedback_menu, tip_menu, confirm_purchase_menu)
 from bot.localization import t
 from bot.logger_mesh import logger
 from bot.misc import TgConfig, EnvKeys
@@ -39,6 +39,9 @@ from bot.utils import display_name
 from bot.utils.notifications import notify_owner_of_purchase
 from bot.utils.level import get_level_info
 from bot.utils.files import cleanup_item_file
+
+PURCHASE_SUCCESS_STATUSES = {'finished', 'confirmed', 'sending', 'paid', 'success'}
+PURCHASE_FAILURE_STATUSES = {'failed', 'refunded', 'expired', 'chargeback', 'cancelled'}
 
 
 def build_menu_text(user_obj, balance: float, purchases: int, lang: str) -> str:
@@ -598,15 +601,22 @@ async def confirm_buy_callback_handler(call: CallbackQuery):
     _, discount, _, _ = get_level_info(purchases)
     price = round(info['price'] * (100 - discount) / 100, 2)
     lang = get_user_language(user_id) or 'en'
+    balance = get_user_balance(user_id)
     TgConfig.STATE[user_id] = None
     TgConfig.STATE[f'{user_id}_pending_item'] = item_name
     TgConfig.STATE[f'{user_id}_price'] = price
     text = t(lang, 'confirm_purchase', item=display_name(item_name), price=price)
+    text += '\n\n' + t(
+        lang,
+        'confirm_purchase_details',
+        balance=f'{balance:.2f}',
+        due=f'{max(price - balance, 0):.2f}',
+    )
     await bot.edit_message_text(
         chat_id=call.message.chat.id,
         message_id=call.message.message_id,
         text=text,
-        reply_markup=confirm_purchase_menu(item_name, lang, user_id)
+        reply_markup=confirm_purchase_menu(item_name, lang, user_id, price, balance)
     )
 
 async def apply_promo_callback_handler(call: CallbackQuery):
@@ -646,13 +656,84 @@ async def process_promo_code(message: Message):
         text = t(lang, 'promo_applied', price=new_price)
     else:
         text = t(lang, 'promo_invalid')
+    current_price = TgConfig.STATE.get(f'{user_id}_price', price)
+    balance = get_user_balance(user_id)
     await bot.edit_message_text(
         chat_id=message.chat.id,
         message_id=message_id,
         text=text,
-        reply_markup=confirm_purchase_menu(item_name, lang, user_id)
+        reply_markup=confirm_purchase_menu(item_name, lang, user_id, current_price, balance)
     )
     TgConfig.STATE[user_id] = None
+
+
+async def prepare_crypto_invoice(call: CallbackQuery, item_name: str, use_balance: float | None) -> None:
+    bot, user_id = await get_bot_user_ids(call)
+    info = get_item_info(item_name)
+    if not info:
+        await call.answer('❌ Item not found', show_alert=True)
+        return
+    lang = get_user_language(user_id) or 'en'
+    purchases_before = select_user_items(user_id)
+    price = TgConfig.STATE.get(f'{user_id}_price')
+    if price is None:
+        _, discount, _, _ = get_level_info(purchases_before)
+        price = round(info['price'] * (100 - discount) / 100, 2)
+        TgConfig.STATE[f'{user_id}_price'] = price
+    balance = get_user_balance(user_id)
+    credits = balance if use_balance is None else use_balance
+    if credits > balance + 1e-9:
+        await call.answer(t(lang, 'not_enough_balance_for_credit'), show_alert=True)
+        credits = min(balance, price)
+    amount_due = round(max(price - credits, 0), 2)
+    TgConfig.STATE[user_id] = None
+    TgConfig.STATE[f'{user_id}_pending_item'] = item_name
+    if amount_due <= 0:
+        original_data = call.data
+        call.data = f'buy_{item_name}'
+        try:
+            await buy_item_callback_handler(call)
+        finally:
+            call.data = original_data
+        return
+    context = {
+        'item_name': item_name,
+        'price': price,
+        'use_balance': round(min(credits, price), 2),
+        'lang': lang,
+        'chat_id': call.message.chat.id,
+        'message_id': call.message.message_id,
+        'from_user': {
+            'username': call.from_user.username,
+            'full_name': call.from_user.full_name,
+        },
+        'purchases_before': purchases_before,
+    }
+    TgConfig.STATE[f'{user_id}_purchase_context'] = context
+    text = t(
+        lang,
+        'crypto_selection_prompt',
+        amount=f'{amount_due:.2f}',
+        item=display_name(item_name),
+    )
+    await call.answer()
+    markup = crypto_choice(back_callback=f'confirm_{item_name}')
+    await bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text=text,
+        reply_markup=markup,
+    )
+
+
+async def pay_with_crypto_handler(call: CallbackQuery):
+    item_name = call.data[len('cryptobuy_'):]
+    await prepare_crypto_invoice(call, item_name, 0)
+
+
+async def pay_with_credit_and_crypto_handler(call: CallbackQuery):
+    item_name = call.data[len('creditpay_'):]
+    await prepare_crypto_invoice(call, item_name, None)
 
 async def buy_item_callback_handler(call: CallbackQuery):
     item_name = call.data[4:]
@@ -794,6 +875,303 @@ async def buy_item_callback_handler(call: CallbackQuery):
     TgConfig.STATE.pop(f'{user_id}_pending_item', None)
     TgConfig.STATE.pop(f'{user_id}_price', None)
 
+
+async def handle_purchase_crypto_payment(call: CallbackQuery, currency: str, context: dict) -> None:
+    bot, user_id = await get_bot_user_ids(call)
+    item_name = context['item_name']
+    price = context['price']
+    use_balance = context['use_balance']
+    amount_due = round(max(price - use_balance, 0), 2)
+    if amount_due <= 0:
+        original_data = call.data
+        call.data = f'buy_{item_name}'
+        try:
+            await buy_item_callback_handler(call)
+        finally:
+            call.data = original_data
+        TgConfig.STATE.pop(f'{user_id}_purchase_context', None)
+        return
+
+    payment_id, address, pay_amount = create_payment(float(amount_due), currency)
+    pay_amount_str = f'{pay_amount:.8f}'.rstrip('0').rstrip('.')
+    if not pay_amount_str:
+        pay_amount_str = f'{pay_amount:.8f}'
+    expires_at = (
+        datetime.datetime.now() + datetime.timedelta(seconds=int(TgConfig.PAYMENT_TIME))
+    ).strftime('%H:%M')
+    lang = context['lang']
+    caption = t(
+        lang,
+        'purchase_invoice_caption',
+        item=display_name(item_name),
+        amount=pay_amount_str,
+        currency=currency.upper(),
+        credits=f'{use_balance:.2f}',
+    )
+    caption += f"\n\n<code>{address}</code>\n\n⏳ Expires at: {expires_at} LT"
+
+    qr = qrcode.make(address)
+    buf = BytesIO()
+    qr.save(buf, format='PNG')
+    buf.seek(0)
+
+    await call.answer()
+    with contextlib.suppress(Exception):
+        await bot.delete_message(chat_id=call.message.chat.id, message_id=call.message.message_id)
+
+    sent = await bot.send_photo(
+        chat_id=context['chat_id'],
+        photo=buf,
+        caption=caption,
+        parse_mode='HTML',
+        reply_markup=purchase_crypto_invoice_menu(payment_id, lang),
+    )
+    info = {
+        'user_id': user_id,
+        'item_name': item_name,
+        'price': price,
+        'use_balance': use_balance,
+        'lang': lang,
+        'chat_id': context['chat_id'],
+        'invoice_message_id': sent.message_id,
+        'from_user': context['from_user'],
+        'purchases_before': context['purchases_before'],
+        'currency': currency.upper(),
+        'pay_amount': pay_amount_str,
+        'address': address,
+        'expires_at': expires_at,
+        'due_eur': amount_due,
+    }
+    TgConfig.STATE[f'purchase_invoice_{payment_id}'] = info
+    TgConfig.STATE[f'{user_id}_active_invoice'] = payment_id
+    TgConfig.STATE.pop(f'{user_id}_purchase_context', None)
+    asyncio.create_task(monitor_purchase_invoice(bot, payment_id))
+
+
+async def monitor_purchase_invoice(bot, payment_id: str) -> None:
+    info = TgConfig.STATE.get(f'purchase_invoice_{payment_id}')
+    if not info:
+        return
+    deadline = asyncio.get_event_loop().time() + int(TgConfig.PAYMENT_TIME)
+    while asyncio.get_event_loop().time() < deadline:
+        status = await asyncio.to_thread(check_payment, payment_id)
+        if status in PURCHASE_SUCCESS_STATUSES:
+            await finalize_purchase_invoice(bot, payment_id)
+            return
+        if status in PURCHASE_FAILURE_STATUSES:
+            await handle_purchase_invoice_failure(bot, payment_id, 'purchase_invoice_cancelled')
+            return
+        await asyncio.sleep(30)
+    await handle_purchase_invoice_failure(bot, payment_id, 'purchase_invoice_timeout')
+
+
+async def handle_purchase_invoice_failure(bot, payment_id: str, message_key: str) -> bool:
+    info = TgConfig.STATE.pop(f'purchase_invoice_{payment_id}', None)
+    if not info:
+        return False
+    TgConfig.STATE.pop(f"{info['user_id']}_active_invoice", None)
+    lang = info['lang']
+    chat_id = info['chat_id']
+    message_id = info['invoice_message_id']
+    with contextlib.suppress(Exception):
+        await bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=message_id,
+            caption=t(lang, message_key),
+            reply_markup=back('back_to_menu'),
+        )
+    await bot.send_message(info['user_id'], t(lang, message_key), reply_markup=back('back_to_menu'))
+    return True
+
+
+async def finalize_purchase_invoice(bot, payment_id: str) -> None:
+    info = TgConfig.STATE.pop(f'purchase_invoice_{payment_id}', None)
+    if not info:
+        return
+    TgConfig.STATE.pop(f"{info['user_id']}_active_invoice", None)
+    user_id = info['user_id']
+    item_name = info['item_name']
+    lang = info['lang']
+    chat_id = info['chat_id']
+    message_id = info['invoice_message_id']
+    purchases_before = info['purchases_before']
+    use_balance = info['use_balance']
+    price = info['price']
+    from_user_data = info['from_user']
+
+    item_info_list = get_item_info(item_name)
+    if not item_info_list:
+        await handle_purchase_invoice_failure(bot, payment_id, 'purchase_invoice_cancelled')
+        return
+
+    value_data = get_item_value(item_name)
+    if not value_data:
+        with contextlib.suppress(Exception):
+            await bot.edit_message_caption(
+                chat_id=chat_id,
+                message_id=message_id,
+                caption=t(lang, 'purchase_out_of_stock'),
+                reply_markup=back('back_to_menu'),
+            )
+        await bot.send_message(
+            user_id,
+            t(lang, 'purchase_out_of_stock'),
+            reply_markup=back('back_to_menu'),
+        )
+        return
+
+    buy_item(value_data['id'], value_data['is_infinity'])
+    current_time = datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+    formatted_time = current_time.strftime("%Y-%m-%d %H:%M:%S")
+
+    applied_credits = 0.0
+    new_balance = get_user_balance(user_id)
+    if use_balance > 0:
+        current_balance = get_user_balance(user_id)
+        applied_credits = min(use_balance, current_balance)
+        if applied_credits > 0:
+            new_balance = buy_item_for_balance(user_id, applied_credits)
+
+    purchase_id = add_bought_item(value_data['item_name'], value_data['value'], price, user_id, formatted_time)
+    purchases = purchases_before + 1
+    level_before, _, _, _ = get_level_info(purchases_before)
+    level_after, discount, _, _ = get_level_info(purchases)
+    if level_after != level_before:
+        msg_text = (
+            f"🎉 Congratulations! You reached {level_after} and received a {discount:.1f}% discount for future purchases.\n\n"
+            f"🎉 Поздравляем! Вы достигли уровня {level_after} и получили скидку {discount:.1f}% на все будущие покупки.\n\n"
+            f"🎉 Sveikiname! Pasiekėte {level_after} ir gavote {discount:.1f}% nuolaidą visiems būsimiesiems pirkiniams."
+        )
+        await bot.send_message(user_id, msg_text)
+
+    username = (
+        f"@{from_user_data.get('username')}"
+        if from_user_data.get('username')
+        else from_user_data.get('full_name')
+    )
+    parent_cat = get_category_parent(item_info_list['category_name'])
+
+    photo_desc = ''
+    file_path = None
+    caption = (
+        f'✅ Item purchased. <b>Balance</b>: <i>{new_balance:.2f}</i>€\n'
+        f'📦 Purchases: {purchases}'
+    )
+    if applied_credits:
+        caption += f"\n🎁 Credits applied: {applied_credits:.2f}€"
+    if os.path.isfile(value_data['value']):
+        desc_file = f"{value_data['value']}.txt"
+        desc_contents = ''
+        if os.path.isfile(desc_file):
+            with open(desc_file) as f:
+                desc_contents = f.read()
+        with open(value_data['value'], 'rb') as media:
+            if desc_contents:
+                caption += f'\n\n{desc_contents}'
+            if value_data['value'].endswith('.mp4'):
+                await bot.send_video(
+                    chat_id=chat_id,
+                    video=media,
+                    caption=caption,
+                    parse_mode='HTML',
+                )
+            else:
+                await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=media,
+                    caption=caption,
+                    parse_mode='HTML',
+                )
+        photo_desc = desc_contents
+        sold_folder = os.path.join(os.path.dirname(value_data['value']), 'Sold')
+        os.makedirs(sold_folder, exist_ok=True)
+        file_path = os.path.join(sold_folder, os.path.basename(value_data['value']))
+        shutil.move(value_data['value'], file_path)
+        if os.path.isfile(desc_file):
+            shutil.move(desc_file, os.path.join(sold_folder, os.path.basename(desc_file)))
+        log_path = os.path.join('assets', 'purchases.txt')
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, 'a', encoding='utf-8') as log_file:
+            log_file.write(
+                f"{formatted_time} user:{user_id} item:{item_name} price:{price}\n"
+            )
+        cleanup_item_file(value_data['value'])
+        if os.path.isfile(desc_file):
+            cleanup_item_file(desc_file)
+    else:
+        text = f'✅ Item purchased. <b>Balance</b>: <i>{new_balance:.2f}</i>€\n📦 Purchases: {purchases}\n\n{value_data["value"]}'
+        await bot.send_message(
+            chat_id,
+            text,
+            parse_mode='HTML',
+            reply_markup=home_markup(lang),
+        )
+        photo_desc = value_data['value']
+
+    success_caption = t(lang, 'purchase_invoice_paid', item=display_name(item_name))
+    with contextlib.suppress(Exception):
+        await bot.edit_message_caption(
+            chat_id=chat_id,
+            message_id=message_id,
+            caption=success_caption,
+            reply_markup=back('back_to_menu'),
+        )
+
+    await notify_owner_of_purchase(
+        bot,
+        username,
+        formatted_time,
+        value_data['item_name'],
+        price,
+        parent_cat,
+        item_info_list['category_name'],
+        photo_desc,
+        file_path,
+    )
+
+    logger.info(
+        "User %s (%s) completed crypto purchase of %s for %s€",
+        user_id,
+        from_user_data.get('full_name'),
+        value_data['item_name'],
+        price,
+    )
+    TgConfig.STATE.pop(f'{user_id}_pending_item', None)
+    TgConfig.STATE.pop(f'{user_id}_price', None)
+    await bot.send_message(user_id, t(lang, 'tip_prompt'), reply_markup=tip_menu(lang))
+    asyncio.create_task(schedule_feedback(bot, user_id, lang))
+
+
+async def cancel_purchase_invoice(call: CallbackQuery):
+    bot, user_id = await get_bot_user_ids(call)
+    invoice_id = call.data.split('_', 2)[2]
+    handled = await handle_purchase_invoice_failure(bot, invoice_id, 'purchase_invoice_cancelled')
+    if handled:
+        await call.answer()
+    else:
+        await call.answer('❌ Invoice not found', show_alert=True)
+
+
+async def check_purchase_invoice(call: CallbackQuery):
+    bot, user_id = await get_bot_user_ids(call)
+    invoice_id = call.data.split('_', 2)[2]
+    info = TgConfig.STATE.get(f'purchase_invoice_{invoice_id}')
+    if not info:
+        await call.answer('❌ Invoice not found', show_alert=True)
+        return
+    status = await asyncio.to_thread(check_payment, invoice_id)
+    if status in PURCHASE_SUCCESS_STATUSES:
+        await finalize_purchase_invoice(bot, invoice_id)
+        await call.answer()
+    elif status in PURCHASE_FAILURE_STATUSES:
+        handled = await handle_purchase_invoice_failure(bot, invoice_id, 'purchase_invoice_cancelled')
+        if handled:
+            await call.answer()
+        else:
+            await call.answer('❌ Invoice not found', show_alert=True)
+    else:
+        lang = info['lang']
+        await call.answer(t(lang, 'purchase_invoice_check_failed'), show_alert=True)
 
 # Tip callback handler
 async def tip_callback_handler(call: CallbackQuery):
@@ -969,7 +1347,7 @@ async def process_replenish_balance(message: Message):
         return
 
     TgConfig.STATE[f'{user_id}_amount'] = text
-    markup = crypto_choice()
+    markup = crypto_choice('replenish_balance')
     await bot.edit_message_text(chat_id=message.chat.id,
                                 message_id=message_id,
                                 text=f'💵 Top-up amount: {text}€. Choose payment method:',
@@ -1008,6 +1386,10 @@ async def pay_yoomoney(call: CallbackQuery):
 async def crypto_payment(call: CallbackQuery):
     bot, user_id = await get_bot_user_ids(call)
     currency = call.data.split('_')[1]
+    purchase_context = TgConfig.STATE.get(f'{user_id}_purchase_context')
+    if purchase_context:
+        await handle_purchase_crypto_payment(call, currency, purchase_context)
+        return
     amount = TgConfig.STATE.pop(f'{user_id}_amount', None)
     if not amount:
         await call.answer(text='❌ Invoice not found')
@@ -1263,6 +1645,10 @@ def register_user_handlers(dp: Dispatcher):
                                        lambda c: c.data.startswith('confirm_'), state='*')
     dp.register_callback_query_handler(apply_promo_callback_handler,
                                        lambda c: c.data.startswith('applypromo_'), state='*')
+    dp.register_callback_query_handler(pay_with_crypto_handler,
+                                       lambda c: c.data.startswith('cryptobuy_'), state='*')
+    dp.register_callback_query_handler(pay_with_credit_and_crypto_handler,
+                                       lambda c: c.data.startswith('creditpay_'), state='*')
     dp.register_callback_query_handler(buy_item_callback_handler,
                                        lambda c: c.data.startswith('buy_'), state='*')
     dp.register_callback_query_handler(tip_callback_handler,
@@ -1271,12 +1657,16 @@ def register_user_handlers(dp: Dispatcher):
                                        lambda c: c.data == 'pay_yoomoney', state='*')
     dp.register_callback_query_handler(crypto_payment,
                                        lambda c: c.data.startswith('crypto_'), state='*')
+    dp.register_callback_query_handler(cancel_purchase_invoice,
+                                       lambda c: c.data.startswith('cancel_purchase_'), state='*')
     dp.register_callback_query_handler(cancel_payment,
-                                       lambda c: c.data.startswith('cancel_'), state='*')
+                                       lambda c: c.data.startswith('cancel_') and not c.data.startswith('cancel_purchase_'), state='*')
     dp.register_callback_query_handler(confirm_cancel_payment,
                                        lambda c: c.data.startswith('confirm_cancel_'), state='*')
+    dp.register_callback_query_handler(check_purchase_invoice,
+                                       lambda c: c.data.startswith('check_purchase_'), state='*')
     dp.register_callback_query_handler(checking_payment,
-                                       lambda c: c.data.startswith('check_'), state='*')
+                                       lambda c: c.data.startswith('check_') and not c.data.startswith('check_purchase_'), state='*')
     dp.register_callback_query_handler(process_home_menu,
                                        lambda c: c.data == 'home_menu', state='*')
 
